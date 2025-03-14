@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         GeoAnki
+// @name         GeoGuessr Anki Integration 
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
-// @description  Automatically creates Anki flashcards after each GeoGuessr round with proper country info and interactive learning hints
-// @author       GeoGuessr-Anki-Dev
+// @version      1.1.0
+// @description  Automatically creates Anki flashcards after each GeoGuessr round with improved round detection, location accuracy, and instant add feature
+// @author       GeoGuessr-Anki-Dev (Enhanced)
 // @match        https://*.geoguessr.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -23,106 +23,7 @@
     'use strict';
 
     /* ========= UTILITY FUNCTIONS ========= */
-    // Debounce function to limit frequency of function calls
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
-        };
-    }
-
-    // Safe DOM selection with multiple fallback selectors
-    function safeQuerySelector(selectors, parent = document) {
-        if (typeof selectors === 'string') selectors = [selectors];
-
-        for (const selector of selectors) {
-            try {
-                const element = parent.querySelector(selector);
-                if (element) return element;
-            } catch (e) {
-                console.warn(`Invalid selector: ${selector}`, e);
-            }
-        }
-        return null;
-    }
-
-    // Safe API call with timeout and error handling
-    function safeApiCall(url, options = {}, timeout = 5000) {
-        return new Promise((resolve) => {
-            const timeoutId = setTimeout(() => {
-                console.warn(`API call to ${url} timed out`);
-                resolve(null);
-            }, timeout);
-
-            fetch(url, options)
-                .then(response => {
-                    clearTimeout(timeoutId);
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    return response.json();
-                })
-                .then(data => {
-                    resolve(data);
-                })
-                .catch(error => {
-                    clearTimeout(timeoutId);
-                    console.error(`API call to ${url} failed:`, error);
-                    resolve(null);
-                });
-        });
-    }
-
-    // Enhanced GM_xmlhttpRequest with better error handling
-    function safeGmXhr(options) {
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                console.warn(`GM_xmlhttpRequest to ${options.url} timed out`);
-                reject(new Error('Request timed out'));
-            }, options.timeout || 10000);
-
-            GM_xmlhttpRequest({
-                ...options,
-                onload: (response) => {
-                    clearTimeout(timeout);
-                    try {
-                        const result = JSON.parse(response.responseText);
-                        resolve(result);
-                    } catch (e) {
-                        console.error('Error parsing response:', e);
-                        reject(e);
-                    }
-                },
-                onerror: (error) => {
-                    clearTimeout(timeout);
-                    console.error('Request error:', error);
-                    reject(error);
-                },
-                ontimeout: () => {
-                    clearTimeout(timeout);
-                    console.error('Request timed out');
-                    reject(new Error('Request timed out'));
-                }
-            });
-        });
-    }
-
-    // Validate and sanitize coordinates
-    function sanitizeCoordinates(lat, lng) {
-        lat = parseFloat(lat);
-        lng = parseFloat(lng);
-
-        if (isNaN(lat) || isNaN(lng)) {
-            return null;
-        }
-
-        // Clamp to valid ranges
-        lat = Math.max(-90, Math.min(90, lat));
-        lng = Math.max(-180, Math.min(180, lng));
-
-        return { lat, lng };
-    }
-
-    /* ========= DEBUGGING & ERROR HANDLING ========= */
+    // Debug mode configuration
     const DEBUG = {
         enabled: true,
         logs: [],
@@ -198,6 +99,105 @@
         }
     };
 
+    // Debounce function to limit frequency of function calls
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    // Safe DOM selection with multiple fallback selectors
+    function safeQuerySelector(selectors, parent = document) {
+        if (typeof selectors === 'string') selectors = [selectors];
+
+        for (const selector of selectors) {
+            try {
+                const element = parent.querySelector(selector);
+                if (element) return element;
+            } catch (e) {
+                DEBUG.warn(`Invalid selector: ${selector}`, e);
+            }
+        }
+        return null;
+    }
+
+    // Safe API call with timeout and error handling
+    function safeApiCall(url, options = {}, timeout = 5000) {
+        return new Promise((resolve) => {
+            const timeoutId = setTimeout(() => {
+                DEBUG.warn(`API call to ${url} timed out`);
+                resolve(null);
+            }, timeout);
+
+            fetch(url, options)
+                .then(response => {
+                    clearTimeout(timeoutId);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    resolve(data);
+                })
+                .catch(error => {
+                    clearTimeout(timeoutId);
+                    DEBUG.error(`API call to ${url} failed:`, error);
+                    resolve(null);
+                });
+        });
+    }
+
+    // Enhanced GM_xmlhttpRequest with better error handling
+    function safeGmXhr(options) {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                DEBUG.warn(`GM_xmlhttpRequest to ${options.url} timed out`);
+                reject(new Error('Request timed out'));
+            }, options.timeout || 10000);
+
+            GM_xmlhttpRequest({
+                ...options,
+                onload: (response) => {
+                    clearTimeout(timeout);
+                    try {
+                        const result = JSON.parse(response.responseText);
+                        resolve(result);
+                    } catch (e) {
+                        DEBUG.error('Error parsing response:', e);
+                        reject(e);
+                    }
+                },
+                onerror: (error) => {
+                    clearTimeout(timeout);
+                    DEBUG.error('Request error:', error);
+                    reject(error);
+                },
+                ontimeout: () => {
+                    clearTimeout(timeout);
+                    DEBUG.error('Request timed out');
+                    reject(new Error('Request timed out'));
+                }
+            });
+        });
+    }
+
+    // Validate and sanitize coordinates
+    function sanitizeCoordinates(lat, lng) {
+        lat = parseFloat(lat);
+        lng = parseFloat(lng);
+
+        if (isNaN(lat) || isNaN(lng)) {
+            return null;
+        }
+
+        // Clamp to valid ranges
+        lat = Math.max(-90, Math.min(90, lat));
+        lng = Math.max(-180, Math.min(180, lng));
+
+        return { lat, lng };
+    }
+
     // Load settings with defaults
     const settings = GM_getValue('geoguessr_anki_settings', {
         uiScale: 1.0,
@@ -208,7 +208,8 @@
         modelName: "GeoguessrBasic",
         showUIButton: true,
         automaticCards: true,
-        hideLocationInFrontCard: true // New setting to control location visibility
+        hideLocationInFrontCard: true,
+        instantAddEnabled: GM_getValue('instantAddEnabled', false) // New setting for instant add
     });
 
     const ANKI_CONNECT_URL = "http://localhost:" + settings.ankiConnectPort;
@@ -244,7 +245,14 @@
         // Add round-specific data storage
         roundLocations: {},
         currentRoundKey: null,
-        cardCreatedForRound: false
+        cardCreatedForRound: false,
+        // For improved round transition detection
+        lastUrl: window.location.href,
+        lastRoundId: null,
+        isProcessingRound: false,
+        cancelCardCreation: false,
+        // For data source tracking
+        dataSource: null
     };
 
     // Store timeouts and intervals for cleanup
@@ -275,7 +283,7 @@
     function checkCountryOverride(lat, lng) {
         for (const override of COUNTRY_OVERRIDES) {
             const tolerance = override.tolerance || 0.1;
-            if (Math.abs(lat - override.coordinates.lat) <= tolerance &&
+            if (Math.abs(lat - override.coordinates.lat) <= tolerance && 
                 Math.abs(lng - override.coordinates.lng) <= tolerance) {
                 DEBUG.log(`Country override match found! ${lat},${lng} → ${override.country}`);
                 return override;
@@ -342,7 +350,8 @@
         const gameplayElements = document.querySelectorAll(
             'div[data-qa="game-status"], ' +
             '[class*="game-status"], ' +
-            '[class*="compass"]'
+            '[class*="compass"], ' +
+            '[data-qa="timer"]'
         );
 
         for (const el of gameplayElements) {
@@ -398,13 +407,34 @@
         return `${gameId}-round-${roundNum}`;
     }
 
+    // Extract round ID from URL or DOM
+    function extractRoundId() {
+        // Try to get round ID from URL
+        const urlMatch = window.location.pathname.match(/\/round\/(\d+)/);
+        if (urlMatch && urlMatch[1]) {
+            return 'url-' + urlMatch[1];
+        }
+
+        // Try to get round ID from DOM
+        const roundElement = document.querySelector('[data-qa="round-number"]');
+        if (roundElement) {
+            const text = roundElement.textContent;
+            const match = text.match(/(\d+)\s*\/\s*\d+/);
+            if (match && match[1]) {
+                return 'dom-' + match[1];
+            }
+        }
+
+        return null;
+    }
+
     // Safely decode panoId with validation
     function panoIdDecoder(geoguessrPanoId) {
         if (!geoguessrPanoId) return "";
 
         // Validate it's a hex string
         if (!/^[0-9a-fA-F]+$/.test(geoguessrPanoId)) {
-            console.warn("Invalid panoId format:", geoguessrPanoId);
+            DEBUG.warn("Invalid panoId format:", geoguessrPanoId);
             return "";
         }
 
@@ -417,7 +447,7 @@
             }
             return gsvPanoId;
         } catch (e) {
-            console.error("Error decoding panoId:", e);
+            DEBUG.error("Error decoding panoId:", e);
             return "";
         }
     }
@@ -427,7 +457,7 @@
         // Sanitize coordinates
         const coords = sanitizeCoordinates(lat, lng);
         if (!coords) {
-            console.warn("Invalid coordinates:", lat, lng);
+            DEBUG.warn("Invalid coordinates:", lat, lng);
             return "#";
         }
 
@@ -465,6 +495,123 @@
                Math.abs(coord.lat) <= 90 && Math.abs(coord.lng) <= 180;
     }
 
+    /* ========= DATA INTERCEPTION & ROUND DETECTION ========= */
+    // Setup URL change detection for SPA navigation
+    function setupUrlChangeDetection() {
+        // Create a MutationObserver to watch for DOM changes (for round transitions)
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    // Check for newly added elements that indicate a round transition
+                    const hasImportantChange = Array.from(mutation.addedNodes).some(node => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            // Check for timer, round indicator, or other elements that appear on round start
+                            return node.querySelector('[data-qa="round-number"]') ||
+                                  node.querySelector('[data-qa="timer"]') ||
+                                  node.querySelector('[class*="guess-map_"]') ||
+                                  node.querySelector('[data-qa="round-result"]');
+                        }
+                        return false;
+                    });
+
+                    if (hasImportantChange) {
+                        DEBUG.log('Detected DOM change that might indicate a round transition');
+                        checkForRoundTransition();
+                    }
+                }
+            }
+        });
+
+        // Start observing the body with all its child nodes
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Also check for URL changes (using a polling approach)
+        setInterval(() => {
+            const currentUrl = window.location.href;
+            if (currentUrl !== gameState.lastUrl) {
+                DEBUG.log('URL changed from', gameState.lastUrl, 'to', currentUrl);
+                gameState.lastUrl = currentUrl;
+                checkForRoundTransition();
+            }
+        }, 500);
+    }
+
+    function checkForRoundTransition() {
+        // Get the current round ID (can be from URL or DOM)
+        const currentRoundId = extractRoundId();
+
+        if (currentRoundId && currentRoundId !== gameState.lastRoundId) {
+            DEBUG.log('New round detected:', currentRoundId);
+            gameState.lastRoundId = currentRoundId;
+
+            // Reset location data for the new round
+            resetRoundData();
+
+            // Force re-detection of game state
+            gameLoop(true);
+
+            // Try to get location data for the new round
+            setTimeout(() => {
+                interceptLocationData();
+            }, 500);
+        }
+
+        // Also check for round end state changes
+        const roundEnded = isRoundEnded();
+        if (roundEnded && !gameState.isProcessingRound && gameState.inRound) {
+            DEBUG.log('Round end detected');
+            gameState.isProcessingRound = true;
+            
+            // Handle round end with a slight delay to ensure data is ready
+            setTimeout(() => {
+                handleRoundEnd();
+                gameState.isProcessingRound = false;
+            }, 1000);
+        }
+    }
+
+    function resetRoundData() {
+        DEBUG.log('Resetting round data');
+        
+        // Keep old round data in roundLocations, but reset current state
+        gameState.currentLocation = null;
+        gameState.panoId = null;
+        gameState.heading = 0;
+        gameState.pitch = 0;
+        gameState.zoom = 0;
+        gameState.guessLocation = null;
+        gameState.guessCountry = null;
+        gameState.actualLocation = null;
+        gameState.actualCountry = null;
+        gameState.score = 0;
+        gameState.countryData = null;
+        gameState.guessCountryData = null;
+        gameState.missedClues = [];
+        gameState.locationOverview = null;
+        gameState.userMissedClues = "";
+        gameState.userReminder = "";
+        gameState.cardCreatedForRound = false;
+        gameState.dataSource = null;
+        gameState.cancelCardCreation = false;
+    }
+
+    // Comprehensive location data interception
+    function interceptLocationData() {
+        DEBUG.log('Intercepting location data from multiple sources');
+        
+        // Try all sources
+        interceptNextData();
+        interceptApiData();
+        extractLocationFromDOM();
+        
+        // Watch for Google Maps to load if not already available
+        if (!window.google || !window.google.maps) {
+            watchForGoogleMaps();
+        } else if (!gameState.dataSource) {
+            interceptStreetView();
+        }
+    }
+
     // Setup XHR interception to capture game data with error handling
     function setupXHRInterception() {
         DEBUG.log("Setting up XHR interception");
@@ -473,12 +620,14 @@
             this.addEventListener('load', function() {
                 try {
                     // For Google Maps metadata - extract panoId and other data
-                    if (url.includes('google.internal.maps.mapsjs')) {
+                    if (url && url.includes('google.internal.maps.mapsjs')) {
                         processGoogleMapsResponse(this.responseText);
                     }
 
                     // For GeoGuessr API - extract game data
-                    if (url.includes('geoguessr.com/api/v3/games') || url.includes('geoguessr.com/api/v4/games')) {
+                    if (url && (url.includes('geoguessr.com/api/v3/games') || 
+                               url.includes('geoguessr.com/api/v4/games') ||
+                               url.includes('api/v3/challenges'))) {
                         processGeoGuessrApiResponse(this.responseText, url);
                     }
                 } catch (e) {
@@ -489,6 +638,158 @@
         };
 
         DEBUG.log("XHR Interception set up successfully");
+    }
+
+    // Intercept fetch requests
+    function interceptFetch() {
+        const originalFetch = window.fetch;
+        window.fetch = function(resource, init) {
+            if (typeof resource === 'string' &&
+                (resource.includes('api/v3/games') ||
+                 resource.includes('api/v4/games') ||
+                 resource.includes('api/v3/challenges'))) {
+
+                DEBUG.log('Fetch intercepted API call:', resource);
+            }
+
+            return originalFetch.apply(this, arguments).then(response => {
+                // We'll only clone and examine API responses
+                if (typeof resource === 'string' &&
+                    (resource.includes('api/v3/games') ||
+                     resource.includes('api/v4/games') ||
+                     resource.includes('api/v3/challenges'))) {
+
+                    // Clone the response so we can read it and still return the original
+                    const clone = response.clone();
+
+                    // Process the cloned response
+                    clone.json().then(data => {
+                        processGeoGuessrApiResponse(data, resource);
+                    }).catch(err => {
+                        DEBUG.error('Error processing fetch response:', err);
+                    });
+                }
+
+                return response;
+            });
+        };
+
+        DEBUG.log("Fetch interception set up");
+    }
+
+    // Extract data from Next.js
+    function interceptNextData() {
+        try {
+            const nextDataElement = document.getElementById('__NEXT_DATA__');
+            if (!nextDataElement) {
+                DEBUG.log('Next.js data element not found');
+                return false;
+            }
+
+            DEBUG.log('Found Next.js data element');
+
+            const rawData = nextDataElement.textContent;
+            const data = JSON.parse(rawData);
+
+            // Extract rounds data if available
+            if (data?.props?.pageProps?.game?.rounds) {
+                const rounds = data.props.pageProps.game.rounds;
+                DEBUG.log('Found rounds data in Next.js. Rounds:', rounds.length);
+
+                if (rounds.length > 0) {
+                    // Try to get the current round based on round number
+                    const currentRound = gameState.roundNumber > 0 && gameState.roundNumber <= rounds.length ?
+                                        gameState.roundNumber - 1 : // Use the correct index based on round number
+                                        rounds.length - 1; // Otherwise use the last round as fallback
+
+                    const round = rounds[currentRound];
+
+                    if (round && round.lat && round.lng) {
+                        DEBUG.log('Found location in Next.js data for round', currentRound + 1, ':', round.lat, round.lng);
+
+                        // Generate round key if not already set
+                        if (!gameState.currentRoundKey) {
+                            gameState.currentRoundKey = generateRoundKey();
+                        }
+
+                        // Initialize round data if needed
+                        if (!gameState.roundLocations[gameState.currentRoundKey]) {
+                            gameState.roundLocations[gameState.currentRoundKey] = {
+                                panoId: round.panoId || null,
+                                location: { lat: round.lat, lng: round.lng },
+                                heading: round.heading || 0,
+                                pitch: round.pitch || 0,
+                                zoom: round.zoom || 0,
+                                country: null,
+                                countryData: null
+                            };
+                        } else {
+                            // Update location in existing round data
+                            gameState.roundLocations[gameState.currentRoundKey].location = { lat: round.lat, lng: round.lng };
+                            if (round.panoId) gameState.roundLocations[gameState.currentRoundKey].panoId = round.panoId;
+                            if (round.heading) gameState.roundLocations[gameState.currentRoundKey].heading = round.heading;
+                            if (round.pitch) gameState.roundLocations[gameState.currentRoundKey].pitch = round.pitch;
+                            if (round.zoom) gameState.roundLocations[gameState.currentRoundKey].zoom = round.zoom;
+                        }
+
+                        // Update current state
+                        gameState.actualLocation = { lat: round.lat, lng: round.lng };
+                        gameState.currentLocation = { lat: round.lat, lng: round.lng };
+                        if (round.panoId) gameState.panoId = round.panoId;
+                        if (round.heading) gameState.heading = round.heading;
+                        if (round.pitch) gameState.pitch = round.pitch;
+                        if (round.zoom) gameState.zoom = round.zoom;
+                        gameState.dataSource = 'nextjs';
+
+                        // Check for country override based on coordinates
+                        const override = checkCountryOverride(round.lat, round.lng);
+                        if (override) {
+                            processCountryOverride(override);
+                        } else if (round.countryCode) {
+                            // If we have a country code, use it
+                            gameState.countryCode = round.countryCode;
+                            getCountryInfo(round.countryCode);
+                        } else {
+                            // Otherwise try to get country from coordinates
+                            getCountryFromCoordinates(round.lat, round.lng);
+                        }
+
+                        return true;
+                    }
+                }
+            }
+
+            DEBUG.log('No useful location data found in Next.js data');
+            return false;
+        } catch (e) {
+            DEBUG.error('Error extracting Next.js data:', e);
+            return false;
+        }
+    }
+
+    // Extract location data from GeoGuessr API responses
+    function interceptApiData() {
+        // Try to get the game token from URL
+        const urlMatch = window.location.href.match(/\/game\/([^\/]+)/);
+        if (!urlMatch || !urlMatch[1]) {
+            DEBUG.log('Could not extract game token from URL');
+            return;
+        }
+
+        const gameToken = urlMatch[1];
+        const currentRound = getCurrentRoundNumber();
+        
+        // Attempt to fetch data from the API
+        const apiUrl = `https://www.geoguessr.com/api/v3/games/${gameToken}`;
+        
+        fetch(apiUrl)
+            .then(response => response.json())
+            .then(data => {
+                processGeoGuessrApiResponse(data, apiUrl);
+            })
+            .catch(error => {
+                DEBUG.error('Error fetching API data:', error);
+            });
     }
 
     // Process Google Maps API responses
@@ -539,34 +840,12 @@
                 const lng = parseFloat(coords[1]);
 
                 if (!isNaN(lat) && !isNaN(lng)) {
-                    DEBUG.log(`Intercepted coordinates: ${lat}, ${lng}`);
+                    DEBUG.log(`Intercepted coordinates from Google Maps: ${lat}, ${lng}`);
 
                     // Check for country override based on coordinates
                     const override = checkCountryOverride(lat, lng);
                     if (override) {
-                        DEBUG.log(`Using country override for coordinates: ${override.country}`);
-
-                        // Create country data structure from override
-                        const countryData = {
-                            country: override.country,
-                            countryCode: override.countryCode,
-                            state: null,
-                            city: null,
-                            details: {
-                                country: override.country,
-                                country_code: override.countryCode.toLowerCase()
-                            },
-                            additionalInfo: override.additionalInfo
-                        };
-
-                        // Store this override in both current state and round data
-                        if (gameState.currentRoundKey) {
-                            gameState.roundLocations[gameState.currentRoundKey].country = override.country;
-                            gameState.roundLocations[gameState.currentRoundKey].countryData = countryData;
-                        }
-
-                        gameState.actualCountry = override.country;
-                        gameState.countryData = countryData;
+                        processCountryOverride(override);
                     }
 
                     // Validate coordinates
@@ -579,26 +858,12 @@
 
                         // Also update current state
                         gameState.currentLocation = validCoords;
+                        gameState.actualLocation = validCoords;
+                        gameState.dataSource = 'googlemaps';
 
                         // If no override found, use Nominatim to get country info
-                        if (!override && isInActiveRound()) {
-                            getCountryInfoFromCoordinates(validCoords.lat, validCoords.lng)
-                                .then(countryData => {
-                                    if (countryData) {
-                                        // Store in round-specific storage
-                                        if (gameState.currentRoundKey) {
-                                            gameState.roundLocations[gameState.currentRoundKey].countryData = countryData;
-                                            gameState.roundLocations[gameState.currentRoundKey].country = countryData.country;
-                                        }
-
-                                        // Also update current state
-                                        gameState.countryData = countryData;
-                                        gameState.actualCountry = countryData.country;
-                                        gameState.actualLocation = validCoords;
-                                        DEBUG.log("Retrieved country data:", countryData);
-                                    }
-                                })
-                                .catch(e => DEBUG.error("Error getting country data", e));
+                        if (!override && isInActiveRound() && (!gameState.countryData || !gameState.actualCountry)) {
+                            getCountryFromCoordinates(validCoords.lat, validCoords.lng);
                         }
                     }
                 }
@@ -649,19 +914,16 @@
     }
 
     // Process GeoGuessr API responses
-    function processGeoGuessrApiResponse(responseText, url) {
+    function processGeoGuessrApiResponse(data, url) {
         DEBUG.log(`Processing GeoGuessr API response from ${url}`);
 
         try {
-            const data = JSON.parse(responseText);
-            DEBUG.log("GeoGuessr API response", data);
-
             if (!data || !data.rounds) {
                 DEBUG.warn("Invalid GeoGuessr API response - missing rounds");
                 return;
             }
 
-            // Store round data for later use
+            // Store game data for later use
             if (!gameState.gameData) {
                 gameState.gameData = data;
                 DEBUG.log("Stored game data", data);
@@ -719,36 +981,17 @@
                             // Check for country override based on coordinates
                             const override = checkCountryOverride(actualCoords.lat, actualCoords.lng);
                             if (override) {
-                                DEBUG.log(`Using country override for coordinates: ${override.country}`);
-
-                                // Create country data structure from override
-                                const countryData = {
-                                    country: override.country,
-                                    countryCode: override.countryCode,
-                                    state: null,
-                                    city: null,
-                                    details: {
-                                        country: override.country,
-                                        country_code: override.countryCode.toLowerCase()
-                                    },
-                                    additionalInfo: override.additionalInfo
-                                };
-
-                                // Store in round-specific storage
-                                gameState.roundLocations[roundKey].country = override.country;
-                                gameState.roundLocations[roundKey].countryData = countryData;
-
-                                // Also update current state
-                                gameState.actualCountry = override.country;
-                                gameState.countryData = countryData;
+                                processCountryOverride(override, roundKey);
                             }
-
+                            
                             // Store actual location in round-specific storage
                             gameState.roundLocations[roundKey].location = actualCoords;
 
                             // Also update current state if needed
                             gameState.actualLocation = actualCoords;
-                            DEBUG.log("Actual location", gameState.actualLocation);
+                            gameState.currentLocation = actualCoords;
+                            gameState.dataSource = 'api';
+                            DEBUG.log("Actual location from API", gameState.actualLocation);
 
                             // Store panoId if available
                             if (actualLocation.panoId) {
@@ -788,31 +1031,351 @@
                     } else {
                         // Skip processLocationData for actual country (already set from override)
                         // Just get the guess country
-                        getCountryInfoFromCoordinates(guessCoords.lat, guessCoords.lng)
-                            .then(countryData => {
-                                if (countryData) {
-                                    // Store in round-specific storage
-                                    gameState.roundLocations[roundKey].guessCountryData = countryData;
-                                    gameState.roundLocations[roundKey].guessCountry = countryData.country;
+                        getCountryFromCoordinates(guessCoords.lat, guessCoords.lng, true);
+                    }
+                }
+            } else if (isInActiveRound() && data.rounds) {
+                // If we're in an active round and just got location data
+                DEBUG.log("Active round, processing location data");
+                const currentRound = getCurrentRoundNumber() - 1; // 0-indexed
 
-                                    // Also update current state
-                                    gameState.guessCountryData = countryData;
-                                    gameState.guessCountry = countryData.country;
-                                    DEBUG.log("Guess country data", countryData);
+                if (data.rounds[currentRound]) {
+                    const actualLocation = data.rounds[currentRound];
+                    const actualCoords = sanitizeCoordinates(actualLocation.lat, actualLocation.lng);
 
-                                    // After getting both countries, fetch location overview
-                                    if (gameState.roundLocations[roundKey].country) {
-                                        fetchLocationOverview(roundKey);
-                                    }
-                                }
-                            })
-                            .catch(e => DEBUG.error("Error getting guess country data", e));
+                    if (actualCoords) {
+                        // Make sure we have the correct round key
+                        const roundKey = generateRoundKey();
+                        gameState.currentRoundKey = roundKey;
+
+                        // Initialize round data if needed
+                        if (!gameState.roundLocations[roundKey]) {
+                            gameState.roundLocations[roundKey] = {
+                                panoId: null,
+                                location: null,
+                                heading: 0,
+                                pitch: 0,
+                                zoom: 0,
+                                country: null,
+                                countryData: null
+                            };
+                        }
+
+                        // Check for country override
+                        const override = checkCountryOverride(actualCoords.lat, actualCoords.lng);
+                        if (override) {
+                            processCountryOverride(override, roundKey);
+                        }
+
+                        // Store location data
+                        gameState.roundLocations[roundKey].location = actualCoords;
+                        gameState.actualLocation = actualCoords;
+                        gameState.currentLocation = actualCoords;
+                        gameState.dataSource = 'api';
+
+                        // Store additional data if available
+                        if (actualLocation.panoId) {
+                            gameState.roundLocations[roundKey].panoId = actualLocation.panoId;
+                            gameState.panoId = actualLocation.panoId;
+                        }
+
+                        if (actualLocation.heading !== undefined) {
+                            gameState.roundLocations[roundKey].heading = actualLocation.heading;
+                            gameState.heading = actualLocation.heading;
+                        }
+
+                        if (actualLocation.pitch !== undefined) {
+                            gameState.roundLocations[roundKey].pitch = actualLocation.pitch;
+                            gameState.pitch = actualLocation.pitch;
+                        }
+
+                        if (actualLocation.zoom !== undefined) {
+                            gameState.roundLocations[roundKey].zoom = actualLocation.zoom;
+                            gameState.zoom = actualLocation.zoom;
+                        }
+
+                        // Get country info if not overridden
+                        if (!override) {
+                            // If country code is available, use it
+                            if (actualLocation.countryCode) {
+                                gameState.countryCode = actualLocation.countryCode;
+                                getCountryInfo(actualLocation.countryCode);
+                            } else {
+                                // Otherwise get from coordinates
+                                getCountryFromCoordinates(actualCoords.lat, actualCoords.lng);
+                            }
+                        }
                     }
                 }
             }
         } catch (e) {
             DEBUG.error("Error parsing GeoGuessr API data", e);
         }
+    }
+
+    // Apply country override
+    function processCountryOverride(override, roundKey = null) {
+        if (!roundKey) {
+            roundKey = gameState.currentRoundKey;
+        }
+
+        DEBUG.log(`Using country override for coordinates: ${override.country}`);
+                
+        // Create country data structure from override
+        const countryData = {
+            country: override.country,
+            countryCode: override.countryCode,
+            state: null,
+            city: null,
+            details: {
+                country: override.country,
+                country_code: override.countryCode.toLowerCase()
+            },
+            additionalInfo: override.additionalInfo
+        };
+        
+        // Store this override in both current state and round data
+        if (roundKey && gameState.roundLocations[roundKey]) {
+            gameState.roundLocations[roundKey].country = override.country;
+            gameState.roundLocations[roundKey].countryData = countryData;
+        }
+        
+        gameState.actualCountry = override.country;
+        gameState.countryData = countryData;
+    }
+
+    // Watch for Google Maps to load
+    function watchForGoogleMaps() {
+        DEBUG.log('Setting up Google Maps watcher...');
+
+        // Check every second if Google Maps is loaded
+        const checkInterval = setInterval(() => {
+            if (window.google && window.google.maps) {
+                DEBUG.log('Google Maps detected!');
+                clearInterval(checkInterval);
+
+                // Intercept StreetView panorama data
+                interceptStreetView();
+            }
+        }, 1000);
+    }
+
+    // Intercept StreetView data
+    function interceptStreetView() {
+        if (!window.google || !window.google.maps || !window.google.maps.StreetViewPanorama) {
+            DEBUG.log('Google Maps StreetView not available');
+            return;
+        }
+
+        DEBUG.log('Intercepting StreetView...');
+
+        // Store original constructor
+        const originalSVP = window.google.maps.StreetViewPanorama;
+
+        // Replace with our version
+        window.google.maps.StreetViewPanorama = function(...args) {
+            DEBUG.log('StreetView panorama created');
+
+            // Call original constructor
+            const panorama = new originalSVP(...args);
+
+            // Extract location if available
+            try {
+                if (args[1] && args[1].position) {
+                    const position = args[1].position;
+                    DEBUG.log('Found position in StreetView:', position.lat(), position.lng());
+
+                    // Only update if we're in a game and don't already have location
+                    if (isInGame() && (!gameState.actualLocation || !gameState.dataSource || gameState.dataSource === 'streetview')) {
+                        const validCoords = sanitizeCoordinates(position.lat(), position.lng());
+                        if (validCoords) {
+                            // Generate round key if not already set
+                            if (!gameState.currentRoundKey) {
+                                gameState.currentRoundKey = generateRoundKey();
+                            }
+
+                            // Initialize round data if needed
+                            if (!gameState.roundLocations[gameState.currentRoundKey]) {
+                                gameState.roundLocations[gameState.currentRoundKey] = {
+                                    panoId: null,
+                                    location: validCoords,
+                                    heading: 0,
+                                    pitch: 0,
+                                    zoom: 0,
+                                    country: null,
+                                    countryData: null
+                                };
+                            } else {
+                                // Update location in existing round data
+                                gameState.roundLocations[gameState.currentRoundKey].location = validCoords;
+                            }
+
+                            // Update current state
+                            gameState.actualLocation = validCoords;
+                            gameState.currentLocation = validCoords;
+                            gameState.dataSource = 'streetview';
+
+                            // Get country info from coordinates
+                            getCountryFromCoordinates(validCoords.lat, validCoords.lng);
+                        }
+                    }
+                }
+
+                // Add listener for position changes
+                panorama.addListener('position_changed', () => {
+                    try {
+                        const position = panorama.getPosition();
+                        if (position) {
+                            DEBUG.log('StreetView position changed:', position.lat(), position.lng());
+
+                            // Only update if we're in a game and don't have confirmed location or our data is from streetview
+                            if (isInGame() && (!gameState.actualLocation || !gameState.dataSource || gameState.dataSource === 'streetview')) {
+                                const validCoords = sanitizeCoordinates(position.lat(), position.lng());
+                                if (validCoords) {
+                                    // Generate round key if not already set
+                                    if (!gameState.currentRoundKey) {
+                                        gameState.currentRoundKey = generateRoundKey();
+                                    }
+
+                                    // Initialize round data if needed
+                                    if (!gameState.roundLocations[gameState.currentRoundKey]) {
+                                        gameState.roundLocations[gameState.currentRoundKey] = {
+                                            panoId: null,
+                                            location: validCoords,
+                                            heading: 0,
+                                            pitch: 0,
+                                            zoom: 0,
+                                            country: null,
+                                            countryData: null
+                                        };
+                                    } else {
+                                        // Update location in existing round data
+                                        gameState.roundLocations[gameState.currentRoundKey].location = validCoords;
+                                    }
+
+                                    // Update current state
+                                    gameState.actualLocation = validCoords;
+                                    gameState.currentLocation = validCoords;
+                                    gameState.dataSource = 'streetview';
+
+                                    // Get country info from coordinates
+                                    getCountryFromCoordinates(validCoords.lat, validCoords.lng);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        DEBUG.error('Error in position_changed listener:', e);
+                    }
+                });
+            } catch (e) {
+                DEBUG.error('Error intercepting StreetViewPanorama:', e);
+            }
+
+            return panorama;
+        };
+
+        // Maintain prototype chain
+        window.google.maps.StreetViewPanorama.prototype = originalSVP.prototype;
+    }
+
+    // Extract location from DOM elements
+    function extractLocationFromDOM() {
+        DEBUG.log('Attempting to extract location from DOM...');
+
+        // Method 1: Check URL for coordinates (sometimes present in URL)
+        const urlMatch = window.location.href.match(/\/maps\/([^\/]+)\/([^\/]+)/);
+        if (urlMatch && urlMatch.length === 3) {
+            const lat = parseFloat(urlMatch[1]);
+            const lng = parseFloat(urlMatch[2]);
+
+            if (!isNaN(lat) && !isNaN(lng)) {
+                DEBUG.log('Found coordinates in URL:', lat, lng);
+
+                const validCoords = sanitizeCoordinates(lat, lng);
+                if (validCoords) {
+                    // Generate round key if not already set
+                    if (!gameState.currentRoundKey) {
+                        gameState.currentRoundKey = generateRoundKey();
+                    }
+
+                    // Initialize round data if needed
+                    if (!gameState.roundLocations[gameState.currentRoundKey]) {
+                        gameState.roundLocations[gameState.currentRoundKey] = {
+                            panoId: null,
+                            location: validCoords,
+                            heading: 0,
+                            pitch: 0,
+                            zoom: 0,
+                            country: null,
+                            countryData: null
+                        };
+                    } else {
+                        // Update location in existing round data
+                        gameState.roundLocations[gameState.currentRoundKey].location = validCoords;
+                    }
+
+                    // Update current state
+                    gameState.actualLocation = validCoords;
+                    gameState.currentLocation = validCoords;
+                    gameState.dataSource = 'url';
+
+                    // Get country info from coordinates
+                    getCountryFromCoordinates(validCoords.lat, validCoords.lng);
+                    return true;
+                }
+            }
+        }
+
+        // Method 2: Find locations in rendered DOM elements
+        // (This is a fallback method that searches for coordinate-like text)
+        const content = document.body.innerText;
+        const coordPattern = /(-?\d+\.\d+),\s*(-?\d+\.\d+)/g;
+
+        let match;
+        while ((match = coordPattern.exec(content)) !== null) {
+            const lat = parseFloat(match[1]);
+            const lng = parseFloat(match[2]);
+
+            if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                DEBUG.log('Found potential coordinates in page text:', lat, lng);
+
+                const validCoords = sanitizeCoordinates(lat, lng);
+                if (validCoords && (!gameState.actualLocation || !gameState.dataSource)) {
+                    // Generate round key if not already set
+                    if (!gameState.currentRoundKey) {
+                        gameState.currentRoundKey = generateRoundKey();
+                    }
+
+                    // Initialize round data if needed
+                    if (!gameState.roundLocations[gameState.currentRoundKey]) {
+                        gameState.roundLocations[gameState.currentRoundKey] = {
+                            panoId: null,
+                            location: validCoords,
+                            heading: 0,
+                            pitch: 0,
+                            zoom: 0,
+                            country: null,
+                            countryData: null
+                        };
+                    } else {
+                        // Update location in existing round data
+                        gameState.roundLocations[gameState.currentRoundKey].location = validCoords;
+                    }
+
+                    // Update current state
+                    gameState.actualLocation = validCoords;
+                    gameState.currentLocation = validCoords;
+                    gameState.dataSource = 'text';
+
+                    // Get country info from coordinates
+                    getCountryFromCoordinates(validCoords.lat, validCoords.lng);
+                    return true;
+                }
+            }
+        }
+
+        DEBUG.log('No coordinates found in DOM');
+        return false;
     }
 
     // Process location data to get country information
@@ -834,94 +1397,31 @@
 
         // Check guess location
         if (isValidCoordinate(roundData.guessLocation)) {
-            getCountryInfoFromCoordinates(
+            getCountryFromCoordinates(
                 roundData.guessLocation.lat,
-                roundData.guessLocation.lng
-            )
-            .then(countryData => {
-                if (countryData) {
-                    // Store in round-specific storage
-                    roundData.guessCountryData = countryData;
-                    roundData.guessCountry = countryData.country;
-
-                    // Also update current state
-                    gameState.guessCountryData = countryData;
-                    gameState.guessCountry = countryData.country;
-                    DEBUG.log("Guess country data", countryData);
-
-                    // After getting both countries, fetch location overview
-                    if (roundData.country) {
-                        fetchLocationOverview(roundKey);
-                    }
-                }
-            })
-            .catch(e => DEBUG.error("Error getting guess country data", e));
+                roundData.guessLocation.lng,
+                true
+            );
         }
 
         // Check actual location - check for override first
         if (isValidCoordinate(roundData.location)) {
             // First check if this is a known problematic coordinate
             const override = checkCountryOverride(
+                roundData.location.lat, 
+                roundData.location.lng
+            );
+            
+            if (override) {
+                processCountryOverride(override, roundKey);
+                return; // Skip the normal geocoding process
+            }
+            
+            // If no override, proceed with normal geocoding
+            getCountryFromCoordinates(
                 roundData.location.lat,
                 roundData.location.lng
             );
-
-            if (override) {
-                DEBUG.log(`Using country override for coordinates: ${override.country}`);
-
-                // Create country data structure from override
-                const countryData = {
-                    country: override.country,
-                    countryCode: override.countryCode,
-                    state: null,
-                    city: null,
-                    details: {
-                        country: override.country,
-                        country_code: override.countryCode.toLowerCase()
-                    },
-                    additionalInfo: override.additionalInfo
-                };
-
-                // Store in round-specific storage
-                roundData.countryData = countryData;
-                roundData.country = countryData.country;
-
-                // Also update current state
-                gameState.countryData = countryData;
-                gameState.actualCountry = countryData.country;
-                DEBUG.log("Using override country data", countryData);
-
-                // After getting both countries, fetch location overview
-                if (roundData.guessCountry) {
-                    fetchLocationOverview(roundKey);
-                }
-
-                return; // Skip the normal geocoding process
-            }
-
-            // If no override, proceed with normal geocoding
-            getCountryInfoFromCoordinates(
-                roundData.location.lat,
-                roundData.location.lng
-            )
-            .then(countryData => {
-                if (countryData) {
-                    // Store in round-specific storage
-                    roundData.countryData = countryData;
-                    roundData.country = countryData.country;
-
-                    // Also update current state
-                    gameState.countryData = countryData;
-                    gameState.actualCountry = countryData.country;
-                    DEBUG.log("Actual country data", countryData);
-
-                    // After getting both countries, fetch location overview
-                    if (roundData.guessCountry) {
-                        fetchLocationOverview(roundKey);
-                    }
-                }
-            })
-            .catch(e => DEBUG.error("Error getting actual country data", e));
         }
     }
 
@@ -995,9 +1495,6 @@
 
             // Prepare missed clues based on country differences
             prepareCountryClues(roundKey);
-
-            // Note: We're not automatically showing the preview or creating the card now
-            // Cards are now created only when the user clicks the button
         });
     }
 
@@ -1118,9 +1615,9 @@
     }
 
     // Get country info from coordinates using Nominatim with robust error handling
-    async function getCountryInfoFromCoordinates(lat, lng) {
+    async function getCountryFromCoordinates(lat, lng, isGuess = false) {
         try {
-            DEBUG.log(`Getting country info for ${lat}, ${lng}`);
+            DEBUG.log(`Getting country info for ${lat}, ${lng} (isGuess: ${isGuess})`);
 
             // Validate coordinates
             const coords = sanitizeCoordinates(lat, lng);
@@ -1131,21 +1628,9 @@
 
             // First check if this coordinate has a known override
             const override = checkCountryOverride(lat, lng);
-            if (override) {
-                DEBUG.log(`Using country override for coordinates: ${override.country}`);
-
-                // Create country data structure from override
-                return {
-                    country: override.country,
-                    countryCode: override.countryCode,
-                    state: null,
-                    city: null,
-                    details: {
-                        country: override.country,
-                        country_code: override.countryCode.toLowerCase()
-                    },
-                    additionalInfo: override.additionalInfo
-                };
+            if (override && !isGuess) {
+                processCountryOverride(override);
+                return;
             }
 
             const url = `https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lng}&format=json&addressdetails=1`;
@@ -1211,11 +1696,112 @@
             };
 
             DEBUG.log("Processed country info", result);
+
+            // Update state based on whether this is a guess or actual location
+            if (isGuess) {
+                // Generate round key if not already set
+                if (!gameState.currentRoundKey) {
+                    gameState.currentRoundKey = generateRoundKey();
+                }
+
+                // Update guess country data
+                if (gameState.roundLocations[gameState.currentRoundKey]) {
+                    gameState.roundLocations[gameState.currentRoundKey].guessCountry = country;
+                    gameState.roundLocations[gameState.currentRoundKey].guessCountryData = result;
+                }
+
+                // Update current state
+                gameState.guessCountry = country;
+                gameState.guessCountryData = result;
+
+                // If we have both actual and guess countries, fetch location overview
+                if (gameState.roundLocations[gameState.currentRoundKey]?.country) {
+                    fetchLocationOverview(gameState.currentRoundKey);
+                }
+            } else {
+                // Generate round key if not already set
+                if (!gameState.currentRoundKey) {
+                    gameState.currentRoundKey = generateRoundKey();
+                }
+
+                // Update actual country data
+                if (gameState.roundLocations[gameState.currentRoundKey]) {
+                    gameState.roundLocations[gameState.currentRoundKey].country = country;
+                    gameState.roundLocations[gameState.currentRoundKey].countryData = result;
+                }
+
+                // Update current state
+                gameState.actualCountry = country;
+                gameState.countryData = result;
+
+                // If we have both actual and guess countries, fetch location overview
+                if (gameState.roundLocations[gameState.currentRoundKey]?.guessCountry) {
+                    fetchLocationOverview(gameState.currentRoundKey);
+                }
+            }
+
             return result;
         } catch (e) {
             DEBUG.error("Error fetching country info from coordinates", e);
             return null;
         }
+    }
+
+    // Get country info from country code
+    function getCountryInfo(countryCode) {
+        if (!countryCode) {
+            DEBUG.warn("No country code provided");
+            return;
+        }
+
+        DEBUG.log('Fetching country info for code:', countryCode);
+
+        // Use RestCountries API for details
+        fetch(`https://restcountries.com/v3.1/alpha/${countryCode}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data && data.length > 0) {
+                    const countryData = data[0];
+                    
+                    DEBUG.log('Received country data:', countryData.name);
+
+                    // Create our country data structure
+                    const result = {
+                        country: countryData.name.common,
+                        countryCode: countryCode,
+                        state: null,
+                        city: null,
+                        details: {
+                            country: countryData.name.common,
+                            country_code: countryCode.toLowerCase()
+                        },
+                        additionalInfo: {
+                            tld: countryData.tld && countryData.tld.length > 0 ? countryData.tld[0] : 'Unknown',
+                            drivingSide: countryData.car && countryData.car.side ? countryData.car.side : 'Unknown',
+                            languages: countryData.languages ? Object.values(countryData.languages) : ['Unknown'],
+                            currency: countryData.currencies ? Object.values(countryData.currencies)[0].name : 'Unknown',
+                            flagUrl: `https://flagcdn.com/w320/${countryCode.toLowerCase()}.png`,
+                            continent: countryData.continents && countryData.continents.length > 0 ? countryData.continents[0] : 'Unknown',
+                            capital: countryData.capital && countryData.capital.length > 0 ? countryData.capital[0] : 'Unknown'
+                        }
+                    };
+
+                    // Store data in game state
+                    gameState.countryData = result;
+                    gameState.actualCountry = countryData.name.common;
+
+                    // Also update round-specific data
+                    if (gameState.currentRoundKey && gameState.roundLocations[gameState.currentRoundKey]) {
+                        gameState.roundLocations[gameState.currentRoundKey].country = countryData.name.common;
+                        gameState.roundLocations[gameState.currentRoundKey].countryData = result;
+                    }
+
+                    DEBUG.log('Country info updated', result);
+                }
+            })
+            .catch(error => {
+                DEBUG.error('Error fetching country details:', error);
+            });
     }
 
     // More robust DOM extraction with multiple fallback approaches
@@ -1301,7 +1887,7 @@
     }
 
     /* ========= ANKI CARD BUILDING ========= */
-    function buildAnkiCardData() {
+    function buildAnkiCardData(useDefaults = false) {
         const roundKey = gameState.currentRoundKey;
         if (!roundKey) {
             DEBUG.error("No round key available for buildAnkiCardData");
@@ -1315,10 +1901,32 @@
             return null;
         }
 
-        // Ensure we have the necessary data
-        if (!roundData.country || !roundData.guessCountry) {
-            DEBUG.error("Missing country data for Anki card");
-            return null;
+        // For instant add, we can use default values for missing data
+        if (useDefaults) {
+            if (!roundData.country) {
+                // Try DOM extraction if API data is missing
+                const extractedCountry = extractCountryFromDOM();
+                if (extractedCountry) {
+                    roundData.country = extractedCountry;
+                    gameState.actualCountry = extractedCountry;
+                } else {
+                    // Use a default value if we can't determine the country
+                    roundData.country = "Unknown Country";
+                    gameState.actualCountry = "Unknown Country";
+                }
+            }
+
+            if (!roundData.guessCountry) {
+                // Use a default for guessed country
+                roundData.guessCountry = "Unknown Guess";
+                gameState.guessCountry = "Unknown Guess";
+            }
+        } else {
+            // For regular add, ensure we have the necessary data
+            if (!roundData.country || !roundData.guessCountry) {
+                DEBUG.error("Missing country data for Anki card");
+                return null;
+            }
         }
 
         // Prepare Street View link for the correct location
@@ -1382,7 +1990,7 @@
             flagHtml = ` <img src="${flagUrl}" class="flag-image" alt="Flag of ${roundData.country}" onerror="this.style.display='none'">`;
         }
 
-        // Back of card (answer) - now uses the user's custom input
+        // Back of card (answer) - uses user's custom input or default content
         let backField = `<h3>✅ Correct Answer: <strong>${roundData.country}</strong>${flagHtml}</h3>
 <h3>❌ Mistake: Guessed ${roundData.guessCountry}</h3>
 
@@ -1399,8 +2007,9 @@
 <p>🌎 <strong>Continent:</strong> <strong>${continent}</strong></p>
 <p>🚗 <strong>Driving Side:</strong> <strong>${drivingSide}</strong></p>`;
 
-        // Use user's custom missed clues if provided, otherwise use the generated ones
-        if (gameState.userMissedClues && gameState.userMissedClues.trim()) {
+        // Use user's custom missed clues if provided and not using defaults,
+        // otherwise use the generated ones or a generic fallback for instant add
+        if (gameState.userMissedClues && gameState.userMissedClues.trim() && !useDefaults) {
             backField += `
 <h3>🛑 Key Clues You Missed:</h3>
 <p>${gameState.userMissedClues}</p>`;
@@ -1421,8 +2030,9 @@
             backField += `</ul>`;
         }
 
-        // Use user's custom reminder if provided, otherwise use the generated one
-        if (gameState.userReminder && gameState.userReminder.trim()) {
+        // Use user's custom reminder if provided and not using defaults,
+        // otherwise use the generated one or a generic fallback for instant add
+        if (gameState.userReminder && gameState.userReminder.trim() && !useDefaults) {
             backField += `
 <h3>Next Time, Remember:</h3>
 <p>⚡ <em>${gameState.userReminder}</em></p>`;
@@ -1536,28 +2146,9 @@
                     gameState.roundLocations[roundKey].location.lat,
                     gameState.roundLocations[roundKey].location.lng
                 );
-
+                
                 if (override) {
-                    DEBUG.log(`Using country override at round end: ${override.country}`);
-
-                    // Create country data structure from override
-                    const countryData = {
-                        country: override.country,
-                        countryCode: override.countryCode,
-                        state: null,
-                        city: null,
-                        details: {
-                            country: override.country,
-                            country_code: override.countryCode.toLowerCase()
-                        },
-                        additionalInfo: override.additionalInfo
-                    };
-
-                    // Update both round data and game state
-                    gameState.roundLocations[roundKey].country = override.country;
-                    gameState.roundLocations[roundKey].countryData = countryData;
-                    gameState.actualCountry = override.country;
-                    gameState.countryData = countryData;
+                    processCountryOverride(override, roundKey);
                 }
             }
 
@@ -1567,6 +2158,7 @@
 
             // Reset card created flag for this round
             gameState.cardCreatedForRound = false;
+            gameState.cancelCardCreation = false;
 
             // Use DOM extraction as a fallback if API fetching failed
             if (!gameState.roundLocations[roundKey].country) {
@@ -1623,6 +2215,19 @@
                 }
             }
 
+            // If automatic cards are enabled and not in battle royale or duel mode, prompt for card creation
+            const gameType = getGameType();
+            if (settings.automaticCards && gameType !== 'battle-royale' && gameType !== 'duel') {
+                DEBUG.log("Auto cards enabled, will prompt for card creation");
+                
+                // Set a slight delay to allow any remaining API data to be processed
+                const timeoutId = setTimeout(() => {
+                    promptForCardCreation();
+                }, 1500);
+                
+                window.geoAnkiTimeouts.push(timeoutId);
+            }
+
             // Update UI state to reflect we're between rounds
             updateUIState({ inActiveRound: false });
         } catch (e) {
@@ -1632,9 +2237,9 @@
 
     /* ========= ANKI INTEGRATION ========= */
     // Create card directly without showing preview
-    function createAnkiCard(cardData) {
+    function createAnkiCard(cardData, useDefaults = false) {
         if (!cardData) {
-            cardData = buildAnkiCardData();
+            cardData = buildAnkiCardData(useDefaults);
         }
 
         if (!cardData) {
@@ -1879,8 +2484,8 @@
         showSettingsPanel(title, message);
     }
 
-    // NEW: Improved card creation function that hides location data
-    function prepareAndCreateAnkiCard() {
+    // Improved card creation function with instant add option
+    function createCardWithOptions(useInstantAdd = false) {
         if (!settings.enableAnkiIntegration) {
             showNotification("Anki integration is disabled in settings.", "info");
             return;
@@ -1899,6 +2504,12 @@
             return;
         }
 
+        // If user cancelled card creation, respect that choice
+        if (gameState.cancelCardCreation) {
+            DEBUG.log("Card creation was previously cancelled by user");
+            return;
+        }
+
         // Check if we already created a card for this round
         if (gameState.cardCreatedForRound) {
             if (confirm("You've already created a card for this round. Create another?")) {
@@ -1908,6 +2519,13 @@
                 showNotification("Card creation cancelled.", "info");
                 return;
             }
+        }
+
+        // For instant add, bypass the prompts and use available data
+        if (useInstantAdd || settings.instantAddEnabled) {
+            DEBUG.log("Using instant add without prompts");
+            createAnkiCard(null, true);
+            return;
         }
 
         // Get round-specific data
@@ -1943,82 +2561,324 @@
             }
         }
 
-        DEBUG.log("Preparing Anki card with round data:", roundData);
+        DEBUG.log("Starting card creation workflow with round data:", roundData);
 
-        // Start the prompting workflow
+        // Launch the prompting workflow
+        promptForCardCreation();
+    }
+
+    // New function to handle the card creation prompt workflow
+    function promptForCardCreation() {
         try {
-            // 1. Prompt for user's guess - don't show the correct country here
-            const guessedLocation = prompt(`What country did you guess?`);
-
-            if (!guessedLocation || !guessedLocation.trim()) {
-                showNotification("Card creation cancelled.", "info");
+            // If user cancelled card creation, respect that choice
+            if (gameState.cancelCardCreation) {
+                DEBUG.log("Card creation was cancelled by user, skipping prompts");
                 return;
             }
 
-            // Set the user's guess country
-            roundData.guessCountry = guessedLocation.trim();
-            gameState.guessCountry = guessedLocation.trim();
+            // Get round-specific data
+            const roundKey = gameState.currentRoundKey;
+            if (!roundKey) {
+                DEBUG.warn("No round key for promptForCardCreation");
+                return;
+            }
 
-            roundData.guessCountryData = roundData.guessCountryData || {
-                country: guessedLocation.trim(),
-                city: "Unknown location",
-                countryCode: null,
-                additionalInfo: {}
+            const roundData = gameState.roundLocations[roundKey];
+            if (!roundData || !roundData.country) {
+                DEBUG.warn("Missing data for promptForCardCreation");
+                return;
+            }
+
+            // Create overlay to prevent interaction with the page below
+            const overlay = document.createElement('div');
+            overlay.className = 'geo-anki-overlay';
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            overlay.style.zIndex = '9998';
+            document.body.appendChild(overlay);
+
+            // Create HTML prompt container
+            const promptContainer = document.createElement('div');
+            promptContainer.className = 'geo-anki-prompt';
+            promptContainer.id = 'geo-anki-prompt-container';
+            promptContainer.style.position = 'fixed';
+            promptContainer.style.top = '50%';
+            promptContainer.style.left = '50%';
+            promptContainer.style.transform = 'translate(-50%, -50%)';
+            promptContainer.style.backgroundColor = 'rgba(30, 30, 30, 0.95)';
+            promptContainer.style.color = 'white';
+            promptContainer.style.padding = '20px';
+            promptContainer.style.borderRadius = '8px';
+            promptContainer.style.zIndex = '9999';
+            promptContainer.style.width = '400px';
+            promptContainer.style.maxWidth = '90%';
+            promptContainer.style.boxShadow = '0 4px 20px rgba(0,0,0,0.4)';
+            promptContainer.style.fontFamily = 'Arial, sans-serif';
+
+            // Create the content programmatically rather than using innerHTML
+            const title = document.createElement('h2');
+            title.style.textAlign = 'center';
+            title.style.marginTop = '0';
+            title.textContent = 'Create Anki Card';
+            promptContainer.appendChild(title);
+
+            // Create guess country section
+            const guessLabel = document.createElement('p');
+            guessLabel.textContent = 'What country did you guess?';
+            promptContainer.appendChild(guessLabel);
+
+            const guessInput = document.createElement('input');
+            guessInput.type = 'text';
+            guessInput.id = 'geo-anki-guess';
+            guessInput.value = roundData.guessCountry || '';
+            guessInput.style.width = '100%';
+            guessInput.style.padding = '8px';
+            guessInput.style.boxSizing = 'border-box';
+            guessInput.style.marginBottom = '15px';
+            guessInput.style.backgroundColor = 'rgba(60,60,60,0.8)';
+            guessInput.style.color = 'white';
+            guessInput.style.border = '1px solid #555';
+            promptContainer.appendChild(guessInput);
+
+            // Create missed clues section
+            const cluesLabel = document.createElement('p');
+            cluesLabel.textContent = 'What clues did you miss? (Leave blank for auto-generated)';
+            promptContainer.appendChild(cluesLabel);
+
+            const cluesTextarea = document.createElement('textarea');
+            cluesTextarea.id = 'geo-anki-clues';
+            cluesTextarea.style.width = '100%';
+            cluesTextarea.style.padding = '8px';
+            cluesTextarea.style.boxSizing = 'border-box';
+            cluesTextarea.style.height = '80px';
+            cluesTextarea.style.marginBottom = '15px';
+            cluesTextarea.style.backgroundColor = 'rgba(60,60,60,0.8)';
+            cluesTextarea.style.color = 'white';
+            cluesTextarea.style.border = '1px solid #555';
+            promptContainer.appendChild(cluesTextarea);
+
+            // Create reminder section
+            const reminderLabel = document.createElement('p');
+            reminderLabel.textContent = `What will you remember next time to identify ${roundData.country}? (Leave blank for auto-generated)`;
+            promptContainer.appendChild(reminderLabel);
+
+            const reminderTextarea = document.createElement('textarea');
+            reminderTextarea.id = 'geo-anki-reminder';
+            reminderTextarea.style.width = '100%';
+            reminderTextarea.style.padding = '8px';
+            reminderTextarea.style.boxSizing = 'border-box';
+            reminderTextarea.style.height = '60px';
+            reminderTextarea.style.marginBottom = '20px';
+            reminderTextarea.style.backgroundColor = 'rgba(60,60,60,0.8)';
+            reminderTextarea.style.color = 'white';
+            reminderTextarea.style.border = '1px solid #555';
+            promptContainer.appendChild(reminderTextarea);
+
+            // Create buttons container
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.justifyContent = 'space-between';
+            
+            // Create cancel button
+            const cancelButton = document.createElement('button');
+            cancelButton.id = 'geo-anki-cancel';
+            cancelButton.textContent = 'Cancel';
+            cancelButton.style.padding = '8px 16px';
+            cancelButton.style.backgroundColor = '#e74c3c';
+            cancelButton.style.color = 'white';
+            cancelButton.style.border = 'none';
+            cancelButton.style.borderRadius = '4px';
+            cancelButton.style.cursor = 'pointer';
+            buttonContainer.appendChild(cancelButton);
+
+            // Create right side buttons container
+            const rightButtonContainer = document.createElement('div');
+            
+            // Create instant add button
+            const instantButton = document.createElement('button');
+            instantButton.id = 'geo-anki-instant';
+            instantButton.textContent = 'Instant Add';
+            instantButton.style.padding = '8px 16px';
+            instantButton.style.backgroundColor = '#3498db';
+            instantButton.style.color = 'white';
+            instantButton.style.border = 'none';
+            instantButton.style.borderRadius = '4px';
+            instantButton.style.cursor = 'pointer';
+            instantButton.style.marginRight = '10px';
+            rightButtonContainer.appendChild(instantButton);
+
+            // Create create button
+            const createButton = document.createElement('button');
+            createButton.id = 'geo-anki-create';
+            createButton.textContent = 'Create Card';
+            createButton.style.padding = '8px 16px';
+            createButton.style.backgroundColor = '#2ecc71';
+            createButton.style.color = 'white';
+            createButton.style.border = 'none';
+            createButton.style.borderRadius = '4px';
+            createButton.style.cursor = 'pointer';
+            rightButtonContainer.appendChild(createButton);
+            
+            buttonContainer.appendChild(rightButtonContainer);
+            promptContainer.appendChild(buttonContainer);
+
+            // Create checkbox section
+            const checkboxContainer = document.createElement('div');
+            checkboxContainer.style.marginTop = '15px';
+            
+            const checkboxLabel = document.createElement('label');
+            checkboxLabel.style.display = 'flex';
+            checkboxLabel.style.alignItems = 'center';
+            checkboxLabel.style.cursor = 'pointer';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = 'geo-anki-instant-toggle';
+            checkbox.style.marginRight = '8px';
+            checkbox.checked = settings.instantAddEnabled;
+            
+            checkboxLabel.appendChild(checkbox);
+            checkboxLabel.appendChild(document.createTextNode('Always use instant add in the future'));
+            
+            checkboxContainer.appendChild(checkboxLabel);
+            promptContainer.appendChild(checkboxContainer);
+
+            // Add to document
+            document.body.appendChild(promptContainer);
+
+            // Set focus to the guess field after a small delay to ensure the element is ready
+            setTimeout(() => {
+                if (guessInput) guessInput.focus();
+            }, 100);
+
+            // Event handlers using direct DOM references rather than getElementById
+            const handleCancel = function() {
+                DEBUG.log("Cancel button clicked");
+                // Mark that user cancelled card creation for this round
+                gameState.cancelCardCreation = true;
+                // Remove the elements from DOM
+                if (overlay && overlay.parentNode) {
+                    overlay.parentNode.removeChild(overlay);
+                }
+                if (promptContainer && promptContainer.parentNode) {
+                    promptContainer.parentNode.removeChild(promptContainer);
+                }
+                showNotification("Card creation cancelled", "info");
             };
-            gameState.guessCountryData = roundData.guessCountryData;
 
-            // 2. Prompt for missed clues - don't show the correct country here
-            const missedClues = prompt(`What clues did you miss that would have helped you identify the correct country?\n(Leave blank to use auto-generated clues)`);
+            const handleInstantAdd = function() {
+                DEBUG.log("Instant Add button clicked");
+                // Save the "Always use instant add" setting
+                const instantToggle = document.getElementById('geo-anki-instant-toggle');
+                if (instantToggle) {
+                    settings.instantAddEnabled = instantToggle.checked;
+                    GM_setValue('instantAddEnabled', settings.instantAddEnabled);
+                }
+                
+                // Remove prompt and create card immediately
+                if (overlay && overlay.parentNode) {
+                    overlay.parentNode.removeChild(overlay);
+                }
+                if (promptContainer && promptContainer.parentNode) {
+                    promptContainer.parentNode.removeChild(promptContainer);
+                }
+                createAnkiCard(null, true);
+            };
 
-            if (missedClues && missedClues.trim()) {
-                gameState.userMissedClues = missedClues.trim();
-            }
+            const handleCreateCard = function() {
+                DEBUG.log("Create Card button clicked");
+                // Get entered values
+                const guessValue = guessInput ? guessInput.value.trim() : '';
+                const cluesValue = cluesTextarea ? cluesTextarea.value.trim() : '';
+                const reminderValue = reminderTextarea ? reminderTextarea.value.trim() : '';
+                
+                // Save the "Always use instant add" setting
+                const instantToggle = document.getElementById('geo-anki-instant-toggle');
+                if (instantToggle) {
+                    settings.instantAddEnabled = instantToggle.checked;
+                    GM_setValue('instantAddEnabled', settings.instantAddEnabled);
+                }
+                
+                // Remove prompt
+                if (overlay && overlay.parentNode) {
+                    overlay.parentNode.removeChild(overlay);
+                }
+                if (promptContainer && promptContainer.parentNode) {
+                    promptContainer.parentNode.removeChild(promptContainer);
+                }
 
-            // 3. Prompt for "next time remember" tip - now we can show the correct country
-            const reminder = prompt(`What will you remember next time to identify ${roundData.country}?\n(Leave blank to use auto-generated reminder)`);
+                // Update state with entered values
+                if (guessValue) {
+                    // Update guess country
+                    gameState.guessCountry = guessValue;
+                    if (roundData) {
+                        roundData.guessCountry = guessValue;
+                        roundData.guessCountryData = roundData.guessCountryData || {
+                            country: guessValue,
+                            city: "Unknown location",
+                            countryCode: null,
+                            additionalInfo: {}
+                        };
+                    }
+                }
 
-            if (reminder && reminder.trim()) {
-                gameState.userReminder = reminder.trim();
-            }
+                if (cluesValue) {
+                    gameState.userMissedClues = cluesValue;
+                }
 
-            // Generate missed clues if none provided
-            if (!roundData.missedClues || roundData.missedClues.length === 0) {
-                prepareCountryClues(roundKey);
-            }
+                if (reminderValue) {
+                    gameState.userReminder = reminderValue;
+                }
 
-            // 4. Generate the card data
-            const cardData = buildAnkiCardData();
+                // Create the card
+                createAnkiCard();
+            };
 
-            if (cardData) {
-                // 5. Create the Anki card directly without preview
-                createAnkiCard(cardData);
-                showNotification(`Card created for ${roundData.country}`, "success");
-
-                // Mark this round as processed
-                gameState.cardCreatedForRound = true;
-                roundData.cardCreated = true;
-            } else {
-                showNotification("Failed to create card - missing required data", "error");
-            }
+            // Attach event listeners directly to the button references
+            if (cancelButton) cancelButton.addEventListener('click', handleCancel);
+            if (instantButton) instantButton.addEventListener('click', handleInstantAdd);
+            if (createButton) createButton.addEventListener('click', handleCreateCard);
+            
+            // Also allow clicking outside the prompt to cancel
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    handleCancel();
+                }
+            });
+            
+            // Add Escape key handler
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    handleCancel();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+            
+            DEBUG.log("Prompt created and event handlers attached");
         } catch (e) {
-            DEBUG.error("Error in card creation process", e);
-            showNotification("Error creating card", "error");
+            DEBUG.error("Error in card creation prompt", e);
+            showNotification("Error creating card prompt", "error");
         }
     }
 
     /* ========= UI & NAVIGATION ========= */
-
+    
     // Create UI with iframe for protection from CSS/JS interference
     function createUIContainer() {
         // Check if container already exists
         if (document.getElementById('geoguessr-anki-container')) {
             return;
         }
-
+        
         // Create our container iframe
         const iframe = document.createElement('iframe');
         iframe.id = 'geoguessr-anki-container';
-
+        
         // Set styles to position it at the bottom-right
         iframe.style.position = 'fixed';
         iframe.style.bottom = '20px';
@@ -2028,13 +2888,13 @@
         iframe.style.border = 'none';
         iframe.style.background = 'transparent';
         iframe.style.zIndex = '2147483647'; // Maximum z-index
-
+        
         // Add it to the page
         document.body.appendChild(iframe);
-
+        
         // Get the iframe's document
         const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-
+        
         // Write the HTML for our UI
         iframeDoc.open();
         iframeDoc.write(`
@@ -2048,7 +2908,7 @@
                         overflow: hidden;
                         font-family: Arial, sans-serif;
                     }
-
+                    
                     /* Main button styles */
                     #toggle-button {
                         position: absolute;
@@ -2067,11 +2927,11 @@
                         transition: all 0.3s ease;
                         z-index: 10;
                     }
-
+                    
                     #toggle-button:hover {
                         transform: scale(1.1);
                     }
-
+                    
                     /* Action buttons container */
                     #action-buttons {
                         position: absolute;
@@ -2086,13 +2946,13 @@
                         transition: all 0.3s ease;
                         pointer-events: none;
                     }
-
+                    
                     #action-buttons.expanded {
                         opacity: 1;
                         transform: translateY(0);
                         pointer-events: auto;
                     }
-
+                    
                     /* Action button style */
                     .action-button {
                         width: 40px;
@@ -2108,15 +2968,15 @@
                         transition: all 0.2s ease;
                         position: relative;
                     }
-
+                    
                     .action-button:hover {
                         transform: scale(1.1);
                     }
-
+                    
                     .action-button:active {
                         transform: scale(0.95);
                     }
-
+                    
                     /* Button label/tooltip */
                     .button-label {
                         position: absolute;
@@ -2131,22 +2991,27 @@
                         transition: opacity 0.2s;
                         pointer-events: none;
                     }
-
+                    
                     .action-button:hover .button-label {
                         opacity: 1;
                     }
-
+                    
                     /* Disabled button state */
                     .action-button.disabled {
                         background-color: #888888;
                         cursor: not-allowed;
+                    }
+
+                    /* Instant add button */
+                    #instant-add-button {
+                        background-color: #2196F3;
                     }
                 </style>
             </head>
             <body>
                 <!-- Main toggle button -->
                 <div id="toggle-button">▶◀</div>
-
+                
                 <!-- Container for action buttons -->
                 <div id="action-buttons">
                     <!-- Create Card Button -->
@@ -2154,26 +3019,32 @@
                         🃏
                         <div class="button-label">Create Anki Card</div>
                     </div>
-
+                    
+                    <!-- Instant Add Button -->
+                    <div class="action-button" id="instant-add-button">
+                        ⚡
+                        <div class="button-label">Instant Add Card</div>
+                    </div>
+                    
                     <!-- Settings Button -->
                     <div class="action-button" id="settings-button">
                         ⚙️
                         <div class="button-label">Settings</div>
                     </div>
-
+                    
                     <!-- Debug Button -->
                     <div class="action-button" id="debug-button">
                         🐞
                         <div class="button-label">Debug</div>
                     </div>
                 </div>
-
+                
                 <script>
                     // Toggle button functionality
                     const toggleButton = document.getElementById('toggle-button');
                     const actionButtons = document.getElementById('action-buttons');
                     let isExpanded = false;
-
+                    
                     // Check localStorage for previous state
                     try {
                         isExpanded = localStorage.getItem('geoAnkiUIExpanded') === 'true';
@@ -2184,11 +3055,11 @@
                     } catch (e) {
                         console.error('Error reading from localStorage:', e);
                     }
-
+                    
                     // Toggle button click handler
                     toggleButton.addEventListener('click', function() {
                         isExpanded = !isExpanded;
-
+                        
                         if (isExpanded) {
                             actionButtons.classList.add('expanded');
                             toggleButton.textContent = '◀▶';
@@ -2196,7 +3067,7 @@
                             actionButtons.classList.remove('expanded');
                             toggleButton.textContent = '▶◀';
                         }
-
+                        
                         // Save state to localStorage
                         try {
                             localStorage.setItem('geoAnkiUIExpanded', isExpanded);
@@ -2204,42 +3075,52 @@
                             console.error('Error writing to localStorage:', e);
                         }
                     });
-
+                    
                     // Create card button
                     document.getElementById('create-card-button').addEventListener('click', function() {
                         parent.postMessage({ action: 'createCard' }, '*');
                     });
 
+                    // Instant Add button
+                    document.getElementById('instant-add-button').addEventListener('click', function() {
+                        parent.postMessage({ action: 'instantAdd' }, '*');
+                    });
+                    
                     // Settings button
                     document.getElementById('settings-button').addEventListener('click', function() {
                         parent.postMessage({ action: 'openSettings' }, '*');
                     });
-
+                    
                     // Debug button
                     document.getElementById('debug-button').addEventListener('click', function() {
                         parent.postMessage({ action: 'debug' }, '*');
                     });
-
+                    
                     // Handle incoming messages from parent window
                     window.addEventListener('message', function(event) {
                         console.log('Message received:', event.data);
-
+                        
                         // Handle state updates
                         if (event.data.type === 'updateState') {
                             const createCardButton = document.getElementById('create-card-button');
-
+                            const instantAddButton = document.getElementById('instant-add-button');
+                            
                             if (event.data.inActiveRound) {
                                 // Disable create card button during active rounds
                                 createCardButton.classList.add('disabled');
                                 createCardButton.querySelector('.button-label').textContent = 'Finish round first';
+                                instantAddButton.classList.add('disabled');
+                                instantAddButton.querySelector('.button-label').textContent = 'Finish round first';
                             } else {
                                 // Enable create card button between rounds
                                 createCardButton.classList.remove('disabled');
                                 createCardButton.querySelector('.button-label').textContent = 'Create Anki Card';
+                                instantAddButton.classList.remove('disabled');
+                                instantAddButton.querySelector('.button-label').textContent = 'Instant Add Card';
                             }
                         }
                     });
-
+                    
                     // Notify parent that UI is ready
                     parent.postMessage({ action: 'uiReady' }, '*');
                 </script>
@@ -2247,49 +3128,54 @@
             </html>
         `);
         iframeDoc.close();
-
-        console.log('GeoGuessr Anki UI created successfully');
+        
+        DEBUG.log('GeoGuessr Anki UI created successfully');
     }
-
+    
     // Handle messages from the iframe
     function setupMessageHandlers() {
         window.addEventListener('message', function(event) {
-            console.log('Received message from UI:', event.data);
-
+            DEBUG.log('Received message from UI:', event.data);
+            
             // Handle different actions
             switch(event.data.action) {
                 case 'uiReady':
-                    console.log('UI is ready');
+                    DEBUG.log('UI is ready');
                     // Update UI state based on current game state
                     updateUIState({
                         inActiveRound: isInActiveRound()
                     });
                     break;
-
+                    
                 case 'createCard':
-                    console.log('Create card button clicked');
-                    prepareAndCreateAnkiCard();
+                    DEBUG.log('Create card button clicked');
+                    createCardWithOptions(false);
                     break;
-
+                    
+                case 'instantAdd':
+                    DEBUG.log('Instant add button clicked');
+                    createCardWithOptions(true);
+                    break;
+                    
                 case 'openSettings':
-                    console.log('Settings button clicked');
+                    DEBUG.log('Settings button clicked');
                     showSettingsPanel();
                     break;
-
+                    
                 case 'debug':
-                    console.log('Debug button clicked');
+                    DEBUG.log('Debug button clicked');
                     DEBUG.copyLogsToClipboard();
                     showNotification("Debug logs copied to clipboard", "success");
                     break;
             }
         });
     }
-
+    
     // Update the UI state
     function updateUIState(state) {
         const iframe = document.getElementById('geoguessr-anki-container');
         if (!iframe) return;
-
+        
         // Send state updates to the iframe
         iframe.contentWindow.postMessage({
             type: 'updateState',
@@ -2311,7 +3197,7 @@
         overlay.style.display = 'flex';
         overlay.style.alignItems = 'center';
         overlay.style.justifyContent = 'center';
-
+        
         // Create the panel
         const panel = document.createElement('div');
         panel.style.backgroundColor = 'rgba(40,40,40,0.95)';
@@ -2323,7 +3209,7 @@
         panel.style.maxHeight = '80vh';
         panel.style.overflowY = 'auto';
         panel.style.boxShadow = '0 3px 20px rgba(0,0,0,0.5)';
-
+        
         // If content is provided, use that instead of settings form
         if (content) {
             panel.innerHTML = `
@@ -2339,17 +3225,17 @@
                     margin-top: 15px;
                 ">Close</button>
             `;
-
+            
             overlay.appendChild(panel);
             document.body.appendChild(overlay);
-
+            
             document.getElementById('close-panel').addEventListener('click', function() {
                 document.body.removeChild(overlay);
             });
-
+            
             return;
         }
-
+        
         // Otherwise show settings
         panel.innerHTML = `
             <h2>${title}</h2>
@@ -2403,6 +3289,12 @@
             </div>
             <div style="margin-bottom: 15px;">
                 <label>
+                    <input type="checkbox" id="instant-add" ${settings.instantAddEnabled ? 'checked' : ''}>
+                    Enable Instant Add (Skip prompts)
+                </label>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label>
                     <input type="checkbox" id="hide-location" ${settings.hideLocationInFrontCard ? 'checked' : ''}>
                     Hide Location in Front Card (Recommended)
                 </label>
@@ -2444,19 +3336,19 @@
                 margin-left: 10px;
             ">Cancel</button>
         `;
-
+        
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
-
+        
         // Add event listeners
         document.getElementById('close-panel').addEventListener('click', function() {
             document.body.removeChild(overlay);
         });
-
+        
         document.getElementById('test-anki-btn').addEventListener('click', function() {
             checkDeckAndModel();
         });
-
+        
         document.getElementById('save-settings').addEventListener('click', function() {
             // Save all settings
             settings.ankiDefaultDeck = document.getElementById('anki-deck').value;
@@ -2465,16 +3357,18 @@
             settings.enableAnkiIntegration = document.getElementById('anki-enabled').checked;
             settings.automaticCards = document.getElementById('auto-cards').checked;
             settings.hideLocationInFrontCard = document.getElementById('hide-location').checked;
+            settings.instantAddEnabled = document.getElementById('instant-add').checked;
             DEBUG.enabled = document.getElementById('debug-mode').checked;
-
+            
             // Update global variables
             DECK_NAME = settings.ankiDefaultDeck;
             MODEL_NAME = settings.modelName;
             ANKI_CONNECT_URL = "http://localhost:" + settings.ankiConnectPort;
-
+            
             // Save to GM storage
             GM_setValue('geoguessr_anki_settings', settings);
-
+            GM_setValue('instantAddEnabled', settings.instantAddEnabled);
+            
             showNotification('Settings saved!', 'success');
             document.body.removeChild(overlay);
         });
@@ -2490,8 +3384,8 @@
         notification.style.transform = 'translateX(-50%)';
         notification.style.padding = '10px 20px';
         notification.style.borderRadius = '5px';
-        notification.style.backgroundColor = type === 'success' ? 'rgba(50,150,50,0.9)' :
-                                            type === 'error' ? 'rgba(150,50,50,0.9)' :
+        notification.style.backgroundColor = type === 'success' ? 'rgba(50,150,50,0.9)' : 
+                                            type === 'error' ? 'rgba(150,50,50,0.9)' : 
                                             'rgba(50,50,50,0.9)';
         notification.style.color = 'white';
         notification.style.boxShadow = '0 3px 10px rgba(0,0,0,0.3)';
@@ -2500,9 +3394,9 @@
         notification.style.fontSize = '14px';
         notification.style.transition = 'opacity 0.3s ease';
         notification.textContent = message;
-
+        
         document.body.appendChild(notification);
-
+        
         // Remove after a delay
         setTimeout(() => {
             notification.style.opacity = '0';
@@ -2525,95 +3419,64 @@
     }
 
     // Game state tracking
-    function updateGameState() {
+    function gameLoop(forceCheck = false) {
         try {
             // Ensure UI is always present
             ensureUIVisibility();
-
+            
+            // Get current state
+            const nowInGame = isInGame();
+            const nowInRound = isInActiveRound();
+            const currentRound = getCurrentRoundNumber();
+            
             // Update button states based on active round
-            updateUIState({ inActiveRound: isInActiveRound() });
+            updateUIState({ inActiveRound: nowInRound });
 
-            // Check if round ended
-            if (isRoundEnded() && gameState.inRound) {
-                DEBUG.log("Round ended detected");
-                gameState.inRound = false;
-
-                // We need to handle round end with some delay to make sure API data is collected
-                const timeoutId = setTimeout(() => {
-                    handleRoundEnd();
-
-                    // If automatic cards are enabled, trigger the card creation flow
-                    if (settings.automaticCards) {
-                        const autoCreateTimeoutId = setTimeout(() => {
-                            prepareAndCreateAnkiCard();
-                        }, 1000);
-                        window.geoAnkiTimeouts.push(autoCreateTimeoutId);
-                    }
-                }, 1500);
-                window.geoAnkiTimeouts.push(timeoutId);
-            }
-            // Check if a new round started
-            else if (isInGame() && !gameState.inRound && isInActiveRound()) {
-                DEBUG.log("New round detected");
-                gameState.inRound = true;
-                gameState.roundNumber = getCurrentRoundNumber();
-                gameState.currentRoundKey = generateRoundKey();
-                gameState.roundStartTime = new Date();
-
-                DEBUG.log(`New round key: ${gameState.currentRoundKey}`);
-
-                // Initialize round data storage if needed
-                if (!gameState.roundLocations[gameState.currentRoundKey]) {
-                    gameState.roundLocations[gameState.currentRoundKey] = {
-                        panoId: null,
-                        location: null,
-                        heading: 0,
-                        pitch: 0,
-                        zoom: 0,
-                        country: null,
-                        countryData: null,
-                        guessLocation: null,
-                        guessCountry: null,
-                        guessCountryData: null,
-                        score: 0,
-                        missedClues: [],
-                        locationOverview: null,
-                        cardCreated: false
-                    };
+            // Handle game state changes
+            if (nowInGame !== gameState.inGame || forceCheck) {
+                gameState.inGame = nowInGame;
+                DEBUG.log('Game state change -', nowInGame ? 'Entered game' : 'Left game');
+    
+                if (!nowInGame) {
+                    // Reset state when leaving a game
+                    resetRoundData();
                 }
-
-                // Reset per-round state for the new round
-                gameState.guessLocation = null;
-                gameState.guessCountry = null;
-                gameState.userGuess = null;
-                gameState.userMissedClues = "";
-                gameState.userReminder = "";
-                gameState.cardCreatedForRound = false;
-
-                // Mark in current state that we're in a new round
-                gameState.score = 0;
-                gameState.missedClues = [];
-                gameState.locationOverview = null;
             }
 
-            // Check if game state changed
-            if (!isInGame() && gameState.inGame) {
-                DEBUG.log("Left game");
-                gameState.inGame = false;
+            // Handle round state changes
+            if (nowInRound !== gameState.inRound || (nowInRound && currentRound !== gameState.roundNumber) || forceCheck) {
+                gameState.inRound = nowInRound;
+                gameState.roundNumber = currentRound;
 
-                // Reset state when leaving a game
-                gameState.actualCountry = null;
-                gameState.guessCountry = null;
-                gameState.userGuess = null;
-                gameState.countryData = null;
-                gameState.guessCountryData = null;
-                gameState.cardCreatedForRound = false;
-            } else if (isInGame() && !gameState.inGame) {
-                DEBUG.log("Entered game");
-                gameState.inGame = true;
+                DEBUG.log('Round state change -',
+                    nowInRound ? `Started round ${currentRound}` : 'Ended round',
+                    'Current location:', gameState.actualLocation);
+
+                if (nowInRound) {
+                    // New round started, try to get location data again
+                    gameState.currentRoundKey = generateRoundKey();
+                    interceptLocationData();
+                } else if (!nowInRound && gameState.inRound) {
+                    // Round just ended
+                    if (!gameState.isProcessingRound) {
+                        gameState.isProcessingRound = true;
+                        handleRoundEnd();
+                        setTimeout(() => {
+                            gameState.isProcessingRound = false;
+                        }, 1000);
+                    }
+                }
+            }
+
+            // If we're in a round but don't have location data, keep trying
+            if (nowInRound && !gameState.actualLocation) {
+                // Periodically try to get location data
+                if (Math.random() < 0.2) { // 20% chance each second to avoid excessive calls
+                    interceptLocationData();
+                }
             }
         } catch (e) {
-            DEBUG.error("Error in updateGameState", e);
+            DEBUG.error("Error in game loop", e);
         }
     }
 
@@ -2622,13 +3485,13 @@
     function setupPersistence() {
         setInterval(function() {
             if (!document.getElementById('geoguessr-anki-container') && document.body) {
-                console.log('UI missing, recreating...');
+                DEBUG.log('UI missing, recreating...');
                 createUIContainer();
                 setupMessageHandlers();
             }
         }, 5000);
     }
-
+    
     // Cleanup function to clear all timeouts and intervals
     function cleanup() {
         // Clear any timeouts
@@ -2645,17 +3508,23 @@
 
     // Initialize everything
     function init() {
-        console.log('GeoGuessr Anki Integration initializing...');
+        DEBUG.log('GeoGuessr Anki Integration initializing...');
 
         // Only run on GeoGuessr
         if (!isGeoGuessr()) {
-            console.log('Not on GeoGuessr; stopping initialization.');
+            DEBUG.log('Not on GeoGuessr; stopping initialization.');
             return;
         }
 
         // Setup XHR interception for game data
         setupXHRInterception();
-
+        
+        // Setup fetch interception
+        interceptFetch();
+        
+        // Setup URL change detection
+        setupUrlChangeDetection();
+        
         // Initialize UI
         if (document.body) {
             createUIContainer();
@@ -2666,29 +3535,29 @@
             window.geoAnkiTimeouts.push(initTimeout);
             return;
         }
-
+        
         // Setup persistence checking
         setupPersistence();
-
+        
         // Setup game state tracking
-        const gameStateInterval = setInterval(updateGameState, 1000);
+        const gameStateInterval = setInterval(() => gameLoop(), 1000);
         window.geoAnkiIntervals.push(gameStateInterval);
-
+        
         // Setup cleanup interval
         const cleanupInterval = setInterval(cleanup, 60000); // every minute
         window.geoAnkiIntervals.push(cleanupInterval);
 
         // Register Tampermonkey menu command
         GM_registerMenuCommand('GeoGuessr Anki Settings', showSettingsPanel);
-
+        
         // Set up visibility change handler
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
                 ensureUIVisibility();
-                updateGameState();
+                gameLoop(true);
             }
         });
-
+        
         // Set up mutation observer to detect DOM changes
         if (window.MutationObserver) {
             try {
@@ -2697,16 +3566,16 @@
                         ensureUIVisibility();
                     }
                 });
-
+                
                 if (document.body) {
                     observer.observe(document.body, { childList: true, subtree: true });
                 }
             } catch (e) {
-                console.warn('Failed to set up mutation observer:', e);
+                DEBUG.warn('Failed to set up mutation observer:', e);
             }
         }
 
-        console.log('GeoGuessr Anki Integration initialized!');
+        DEBUG.log('GeoGuessr Anki Integration initialized!');
     }
 
     // Initialize when the DOM is ready or after a delay if already loaded
@@ -2715,19 +3584,19 @@
     } else {
         // Try immediately
         init();
-
+        
         // Also try after a delay as a fallback
         setTimeout(init, 500);
     }
-
+    
     // Additional initialization attempts for reliability
     window.addEventListener('load', () => {
         if (!document.getElementById('geoguessr-anki-container')) {
-            console.log('Window load event triggered - initializing UI');
+            DEBUG.log('Window load event triggered - initializing UI');
             init();
         }
     });
-
+    
     // Clean up on page unload
     window.addEventListener('beforeunload', cleanup);
 })();
